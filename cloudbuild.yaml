@@ -34,11 +34,11 @@ steps:
     - |
       set -euo pipefail
       USER_NEXT="${_NEXT_TAG:-}"
-      if [[ -n "$USER_NEXT" ]]; then
-        if [[ "$USER_NEXT" != "blue" && "$USER_NEXT" != "green" ]]; then
-          echo "invalid _NEXT_TAG=$USER_NEXT"; exit 1
+      if [[ -n "$$USER_NEXT" ]]; then
+        if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
+          echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
         fi
-        NEXT_TAG="$USER_NEXT"
+        NEXT_TAG="$$USER_NEXT"
       else
         CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
           --format='value(status.traffic[0].tag)' || true)"

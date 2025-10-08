@@ -45,12 +45,12 @@ steps:
         # 讀使用者是否在 Trigger 指定了 _NEXT_TAG（可能沒填，所以用 ${_NEXT_TAG:-}）
         USER_NEXT="${_NEXT_TAG:-}"
 
-        if [[ -n "$USER_NEXT" ]]; then
+        if [[ -n "$$USER_NEXT" ]]; then
           # 白名單檢查，避免亂填
-          if [[ "$USER_NEXT" != "blue" && "$USER_NEXT" != "green" ]]; then
+          if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
             echo "invalid _NEXT_TAG=$USER_NEXT"; exit 1
           fi
-          NEXT_TAG="$USER_NEXT"    # ← 這是 bash 變數（執行期）
+          NEXT_TAG="$$USER_NEXT"    # ← 這是 bash 變數（執行期）
         else
           # 查目前服務的主要流量 tag（可能取不到，所以 || true）
           CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \

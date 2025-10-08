@@ -12,6 +12,7 @@ substitutions:
   _REGION: asia-east1
   _AR_REPO: cicd-bluegreen-docker
   _SERVICE: cicdbg
+  _NEXT_TAG: ""
 
   # 若你將來換自訂的 runtime SA，再改這個；目前用 Compute Default SA 即可
   _RUNTIME_SA: projects/$PROJECT_NUMBER/serviceAccounts/$PROJECT_NUMBER-compute@developer.gserviceaccount.com
@@ -41,10 +42,13 @@ steps:
       - -ceu
       - |
         set -euo pipefail
-        # 讀目前流量的主要 tag（第一次可能空）
-        CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
-          --format='value(status.traffic[0].tag)' || true)"
-        if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
+        if [[ -n "${_NEXT_TAG}" ]]; then
+          NEXT_TAG="${_NEXT_TAG}"
+          [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1; }
+        else
+          CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format='value(status.traffic[0].tag)' || true)"
+          if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
+        fi
         echo "NEXT_TAG=$NEXT_TAG" | tee /workspace/next_color
 
   # 4) Deploy new revision tagged as NEXT_TAG with NO traffic (0%)

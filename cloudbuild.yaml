@@ -5,9 +5,11 @@ substitutions:
   _REGION: asia-east1
   _AR_REPO: cicd-bluegreen-docker
   _SERVICE: cicdbg
+  _NEXT_TAG: ""  # 可填 "blue" 或 "green"，留空就自動判斷
   _RUNTIME_SA: projects/$PROJECT_NUMBER/serviceAccounts/$PROJECT_NUMBER-compute@developer.gserviceaccount.com
 
 steps:
+  # 1) Build image
   - name: gcr.io/cloud-builders/docker
     id: build
     args:
@@ -16,12 +18,14 @@ steps:
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
       - .
 
+  # 2) Push image
   - name: gcr.io/cloud-builders/docker
     id: push
     args:
       - push
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
+  # 3) Decide next color
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: decide-color
     entrypoint: bash
@@ -29,12 +33,16 @@ steps:
       - -ceu
       - |
         set -euo pipefail
-        CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
-          --format='value(status.traffic[0].tag)' || true)"
-        if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
-        # 這裡用 $$NEXT_TAG，避免被 Cloud Build 當成置換變數
+        if [[ -n "${_NEXT_TAG}" ]]; then
+          NEXT_TAG="${_NEXT_TAG}"
+          [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1; }
+        else
+          CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format='value(status.traffic[0].tag)' || true)"
+          if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
+        fi
         echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
 
+  # 4) Deploy new revision with tag and NO traffic (0%)
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: deploy-no-traffic
     entrypoint: bash
@@ -44,15 +52,16 @@ steps:
         set -euo pipefail
         source /workspace/next_color
         IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
-        echo "Deploying image: $IMAGE with tag: $$NEXT_TAG (no traffic)"
+        echo "Deploying image: $$IMAGE with tag: $$NEXT_TAG (no traffic)"
         gcloud run deploy "${_SERVICE}" \
-          --image "${IMAGE}" \
+          --image "$$IMAGE" \
           --region "${_REGION}" \
           --tag "$$NEXT_TAG" \
           --no-traffic \
           --service-account "${_RUNTIME_SA}" \
           --set-env-vars=APP_VERSION="${SHORT_SHA}",APP_COLOR="$$NEXT_TAG"
 
+  # 5) Hint / smoke-test instruction
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: hint
     entrypoint: bash
@@ -62,8 +71,9 @@ steps:
         source /workspace/next_color
         echo "Deployed ${_SERVICE} new revision with tag=$$NEXT_TAG at 0%."
         echo "到 Cloud Run > ${_SERVICE} > Revisions > Tags 複製 $$NEXT_TAG 的 tag URL 測試 /healthz。"
+        echo "測試通過後，再用 Manage traffic 把 $$NEXT_TAG=100%（或做金絲雀 1%、5% ...）"
 
-# 想要建置完成自動切 100%，再把下面的步驟取消註解，並同樣使用 $$NEXT_TAG
+# 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
 #  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
 #    id: promote-to-100
 #    entrypoint: bash

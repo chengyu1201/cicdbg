@@ -6,8 +6,7 @@ substitutions:
   _AR_REPO: cicd-bluegreen-docker
   _SERVICE: cicdbg
   _NEXT_TAG: ""  # 可填 "blue" 或 "green"，留空＝自動判斷
-  _RUNTIME_SA: projects/$PROJECT_NUMBER/serviceAccounts/$PROJECT_NUMBER-compute@developer.gserviceaccount.com
-
+  
 steps:
   # 1) Build image
   - name: gcr.io/cloud-builders/docker

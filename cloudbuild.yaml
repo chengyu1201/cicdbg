@@ -35,7 +35,7 @@ steps:
         set -euo pipefail
         if [[ -n "$${_NEXT_TAG}" ]]; then
           NEXT_TAG="$${_NEXT_TAG}"
-          [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1; }
+          [[ "$$NEXT_TAG" == "blue" || "$$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$$NEXT_TAG"; exit 1; }
         else
           CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format='value(status.traffic[0].tag)' || true)"
           if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi

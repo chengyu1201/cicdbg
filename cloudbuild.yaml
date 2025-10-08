@@ -1,58 +1,69 @@
+# Cloud Build 只記錄到 Cloud Logging（簡潔）
 options:
   logging: CLOUD_LOGGING_ONLY
 
+# 🔧 可調參數（substitution 變數）：
+# 注意：這些是「建置期替換」的變數，名字一律以下劃線開頭。
 substitutions:
-  _REGION: asia-east1
-  _AR_REPO: cicd-bluegreen-docker
-  _SERVICE: cicdbg
-  _NEXT_TAG: ""  # 可填 "blue" 或 "green"，留空＝自動判斷
-  _RUNTIME_SA: projects/$PROJECT_NUMBER/serviceAccounts/$PROJECT_NUMBER-compute@developer.gserviceaccount.com
+  _REGION: asia-east1                 # 你的區域
+  _AR_REPO: cicd-bluegreen-docker     # 你的 Artifact Registry repository
+  _SERVICE: cicdbg                    # 你的 Cloud Run 服務名
+  _NEXT_TAG: ""                       # 可選：手動指定 blue/green；留空=自動判斷
+  _RUNTIME_SA_EMAIL: ""               # 可選：若你要用自訂執行 SA 的「email」，在 Trigger 補這個；留空=用 Compute Default SA
 
+# 📌 步驟 0：Build 成容器映像
 steps:
-  # 1) Build image
   - name: gcr.io/cloud-builders/docker
     id: build
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+      # 這裡用的是「建置期」變數：${_REGION}、${PROJECT_ID}、${_AR_REPO}、${_SERVICE}、${SHORT_SHA}
+      # 由 Cloud Build 在執行前就把這些字串替換成真的值
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
       - .
 
-  # 2) Push image
+  # 📌 步驟 1：Push 到 Artifact Registry
   - name: gcr.io/cloud-builders/docker
     id: push
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
-  # 3) Decide next color
+  # 📌 步驟 2：決定下一個顏色（blue/green）
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: decide-color
     entrypoint: bash
     args:
-    - -ceu
-    - |
-      set -euo pipefail
-      USER_NEXT="${_NEXT_TAG:-}"
-      if [[ -n "$$USER_NEXT" ]]; then
-        if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
-          echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
+      - -ceu
+      - |
+        # -e：任一指令錯誤就退出
+        # -u：用到未定義變數就報錯（所以讀 substitution 要寫成 ${_VAR:-}）
+        # pipefail：管線任一段錯誤都視為錯
+        set -euo pipefail
+
+        # 讀使用者是否在 Trigger 指定了 _NEXT_TAG（可能沒填，所以用 ${_NEXT_TAG:-}）
+        USER_NEXT="${_NEXT_TAG:-}"
+
+        if [[ -n "$USER_NEXT" ]]; then
+          # 白名單檢查，避免亂填
+          if [[ "$USER_NEXT" != "blue" && "$USER_NEXT" != "green" ]]; then
+            echo "invalid _NEXT_TAG=$USER_NEXT"; exit 1
+          fi
+          NEXT_TAG="$USER_NEXT"    # ← 這是 bash 變數（執行期）
+        else
+          # 查目前服務的主要流量 tag（可能取不到，所以 || true）
+          CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
+            --format='value(status.traffic[0].tag)' || true)"
+          # 若取不到，預設視為 blue，在藍綠上第一次就會佈署 green(0%)
+          if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
         fi
-        NEXT_TAG="$$USER_NEXT"
-      else
-        CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
-          --format='value(status.traffic[0].tag)' || true)"
-        if [[ "${CURR:-blue}" == "blue" ]]; then 
-          NEXT_TAG=green;
-        else 
-          NEXT_TAG=blue; 
-        fi
-      fi
 
-      echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
+        # 把 bash 變數寫到檔案，讓下一步 source 使用。
+        # 這裡寫成 $$NEXT_TAG 是為了避免 Cloud Build 把 $NEXT_TAG 誤當成 substitution。
+        echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
 
-
-  # 4) Deploy new revision with NO traffic (0%), tag = NEXT_TAG
+  # 📌 步驟 3：部署新修訂（0% 流量）
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: deploy-no-traffic
     entrypoint: bash
@@ -60,41 +71,58 @@ steps:
       - -ceu
       - |
         set -euo pipefail
-        source /workspace/next_color
-        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
-        echo "Deploying image: $$IMAGE with tag: $$NEXT_TAG (no traffic)"
-        gcloud run deploy "${_SERVICE}" \
-          --image "$$IMAGE" \
-          --region "${_REGION}" \
-          --tag "$$NEXT_TAG" \
-          --no-traffic \
-          --service-account "${_RUNTIME_SA}" \
-          --set-env-vars=APP_VERSION="${SHORT_SHA}",APP_COLOR="$$NEXT_TAG"
 
-  # 5) Hint for manual test
+        # 讀上一步寫的結果，取得 bash 變數 NEXT_TAG
+        source /workspace/next_color
+
+        # 建出要部署的映像名稱（這些是建置期 substitution，Cloud Build 會先替換）
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+        # 🔑 決定執行時的 Service Account email
+        # 1) 若使用者在 Trigger 提供了 _RUNTIME_SA_EMAIL（substitution），就用它
+        # 2) 否則預設用 Compute Default SA：<PROJECT_NUMBER>-compute@developer.gserviceaccount.com
+        #    這裡用的是「內建 substitution」${PROJECT_NUMBER}，Cloud Build 會先替換成數字，
+        #    這樣 bash 就不會看到未定義的 $PROJECT_NUMBER（避免你剛剛的 unbound variable）
+        SA_EMAIL="${_RUNTIME_SA_EMAIL:-${PROJECT_NUMBER}-compute@developer.gserviceaccount.com}"
+
+        echo "Deploying image: $IMAGE with tag: $NEXT_TAG (no traffic) using SA: $SA_EMAIL"
+
+        # 部署到 Cloud Run：加上 tag，並指定 --no-traffic 讓它先 0%
+        gcloud run deploy "${_SERVICE}" \
+          --image "$IMAGE" \
+          --region "${_REGION}" \
+          --tag "$NEXT_TAG" \
+          --no-traffic \
+          --service-account "$SA_EMAIL" \
+          --set-env-vars=APP_VERSION="${SHORT_SHA}",APP_COLOR="$NEXT_TAG"
+
+  # 📌 步驟 4：提示下一步（到 Console 用 tag URL 驗證 /healthz，然後切流量）
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: hint
     entrypoint: bash
     args:
       - -ceu
       - |
+        set -euo pipefail
         source /workspace/next_color
-        echo "Deployed ${_SERVICE} new revision with tag=$$NEXT_TAG at 0%."
-        echo "到 Cloud Run > ${_SERVICE} > Revisions > Tags 複製 $$NEXT_TAG 的 tag URL 測 /healthz。"
-        echo "測試通過後，再用 Manage traffic 把 $$NEXT_TAG=100%（或做金絲雀 1%、5% ...）"
+        echo "Deployed ${_SERVICE} new revision with tag=$NEXT_TAG at 0%."
+        echo "到 Cloud Run > ${_SERVICE} > Revisions > Tags 複製 $NEXT_TAG 的 tag URL 測試 /healthz。"
+        echo "測通過後到 Manage traffic 切 $NEXT_TAG=100%（或金絲雀 1%、5%、10% …）"
 
-# 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
+# 若你要建置通過就自動切 100%，可以打開下面這段（同樣用 bash 變數，所以是 $NEXT_TAG）
 #  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
 #    id: promote-to-100
 #    entrypoint: bash
 #    args:
 #      - -ceu
 #      - |
+#        set -euo pipefail
 #        source /workspace/next_color
 #        gcloud run services update-traffic "${_SERVICE}" \
 #          --region "${_REGION}" \
-#          --to-tags "$$NEXT_TAG=100"
-#        echo "Traffic switched to $$NEXT_TAG=100%"
+#          --to-tags "$NEXT_TAG=100"
+#        echo "Traffic switched to $NEXT_TAG=100%"
 
+# 這行讓 Build 頁面能看到剛剛 Push 的映像
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}

@@ -26,26 +26,26 @@ steps:
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
   # 3) Decide next color
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    id: decide-color
-    entrypoint: bash
-    args:
-      - -ceu
-      - |
-        set -euo pipefail
-        # 優先使用 Cloud Build 自訂 substitution _NEXT_TAG（定義於 substitutions）
-        if [[ -n "${_NEXT_TAG:-}" ]]; then
-          NEXT_TAG="${_NEXT_TAG}"
-          [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1; }
-        # 若沒有 _NEXT_TAG，嘗試從執行時的環境變數 NEXT_TAG 讀取（避免在 YAML 中使用 ${NEXT_TAG}）
-        elif [[ -n "$NEXT_TAG" ]]; then
-          NEXT_TAG="$NEXT_TAG"
-          [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid NEXT_TAG=$NEXT_TAG"; exit 1; }
-        else
-          CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format='value(status.traffic[0].tag)' || true)"
-          if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
-        fi
-        echo "NEXT_TAG=$NEXT_TAG" | tee /workspace/next_color
+  # - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+  #   id: decide-color
+  #   entrypoint: bash
+  #   args:
+  #     - -ceu
+  #     - |
+  #       set -euo pipefail
+  #       # 優先使用 Cloud Build 自訂 substitution _NEXT_TAG（定義於 substitutions）
+  #       if [[ -n "${_NEXT_TAG:-}" ]]; then
+  #         NEXT_TAG="$${_NEXT_TAG}"
+  #         [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1; }
+  #       # 若沒有 _NEXT_TAG，嘗試從執行時的環境變數 NEXT_TAG 讀取（避免在 YAML 中使用 ${NEXT_TAG}）
+  #       elif [[ -n "$NEXT_TAG" ]]; then
+  #         NEXT_TAG="$NEXT_TAG"
+  #         [[ "$NEXT_TAG" == "blue" || "$NEXT_TAG" == "green" ]] || { echo "invalid NEXT_TAG=$NEXT_TAG"; exit 1; }
+  #       else
+  #         CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format='value(status.traffic[0].tag)' || true)"
+  #         if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
+  #       fi
+  #       echo "NEXT_TAG=$NEXT_TAG" | tee /workspace/next_color
 
   # 4) Deploy new revision with tag and NO traffic (0%)
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim

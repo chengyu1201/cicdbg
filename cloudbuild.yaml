@@ -33,22 +33,24 @@ steps:
     - -ceu
     - |
       set -euo pipefail
-      # 讀可選的 _NEXT_TAG；沒填就當空字串，避免 set -u 爆掉
-      _NEXT_TAG_VAL="${_NEXT_TAG:-}"
-
-      if [[ -n "$_NEXT_TAG_VAL" ]]; then
-        NEXT_TAG="$__NEXT_TAG_VAL"
-        if [[ "$NEXT_TAG" != "blue" && "$NEXT_TAG" != "green" ]]; then
-          echo "invalid _NEXT_TAG=$NEXT_TAG"; exit 1
+      USER_NEXT="${_NEXT_TAG:-}"
+      if [[ -n "$USER_NEXT" ]]; then
+        if [[ "$USER_NEXT" != "blue" && "$USER_NEXT" != "green" ]]; then
+          echo "invalid _NEXT_TAG=$USER_NEXT"; exit 1
         fi
+        NEXT_TAG="$USER_NEXT"
       else
         CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
           --format='value(status.traffic[0].tag)' || true)"
-        if [[ "${CURR:-blue}" == "blue" ]]; then NEXT_TAG=green; else NEXT_TAG=blue; fi
+        if [[ "${CURR:-blue}" == "blue" ]]; then 
+          NEXT_TAG=green;
+        else 
+          NEXT_TAG=blue; 
+        fi
       fi
 
-      # 重要：用 $$ 把變數留給 bash 展開
       echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
+
 
   # 4) Deploy new revision with NO traffic (0%), tag = NEXT_TAG
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim

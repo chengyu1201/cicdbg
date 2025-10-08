@@ -48,7 +48,7 @@ steps:
         if [[ -n "$$USER_NEXT" ]]; then
           # 白名單檢查，避免亂填
           if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
-            echo "invalid _NEXT_TAG=$USER_NEXT"; exit 1
+            echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
           fi
           NEXT_TAG="$$USER_NEXT"    # ← 這是 bash 變數（執行期）
         else

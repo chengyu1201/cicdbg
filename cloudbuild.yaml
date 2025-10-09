@@ -82,17 +82,17 @@ steps:
         echo "測試通過後，再用 Manage traffic 把 $$NEXT_TAG=100%（或做金絲雀 1%、5% ...）"
 
 # 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
-#  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-#    id: promote-to-100
-#    entrypoint: bash
-#    args:
-#      - -ceu
-#      - |
-#        source /workspace/next_color
-#        gcloud run services update-traffic "${_SERVICE}" \
-#          --region "${_REGION}" \
-#          --to-tags "$$NEXT_TAG=100"
-#        echo "Traffic switched to $$NEXT_TAG=100%"
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: promote-to-100
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        source /workspace/next_color
+        gcloud run services update-traffic "${_SERVICE}" \
+          --region "${_REGION}" \
+          --to-tags "$$NEXT_TAG=100"
+        echo "Traffic switched to $$NEXT_TAG=100%"
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}

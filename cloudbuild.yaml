@@ -25,30 +25,83 @@ steps:
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
   # 3) Decide next color
+  # - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+  #   id: decide-color
+  #   entrypoint: bash
+  #   args:
+  #   - -ceu
+  #   - |
+  #     set -euo pipefail
+  #     USER_NEXT="${_NEXT_TAG:-}"
+  #     if [[ -n "$$USER_NEXT" ]]; then
+  #       if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
+  #         echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
+  #       fi
+  #       NEXT_TAG="$$USER_NEXT"
+  #     else
+  #       CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
+  #         --format='value(status.traffic[0].tag)' || true)"
+  #       echo "Current tag: $$CURR"
+  #       if [[ "${CURR:-blue}" == "blue" ]]; then 
+  #         NEXT_TAG=green;
+  #       else 
+  #         NEXT_TAG=blue; 
+  #       fi
+  #     fi
+  #     echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
+  # 3) Decide next color（改成看「流量最大」那一筆）
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: decide-color
     entrypoint: bash
     args:
-    - -ceu
-    - |
-      set -euo pipefail
-      USER_NEXT="${_NEXT_TAG:-}"
-      if [[ -n "$$USER_NEXT" ]]; then
-        if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
-          echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
+      - -ceu
+      - |
+        # -e: 任一指令錯誤就退出；-u: 取未定義變數報錯；pipefail: 管線任一段錯都算
+        set -euo pipefail
+
+        # 讀使用者是否在 Trigger 的 substitutions 指定了 _NEXT_TAG（可能沒填，所以用 ${_NEXT_TAG:-}）
+        USER_NEXT="${_NEXT_TAG:-}"
+
+        if [[ -n "$$USER_NEXT" ]]; then
+          # ✅ 指定了下一色：先做白名單檢查，再直接使用
+          if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
+            echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
+          fi
+          NEXT_TAG="$$USER_NEXT"                      # 這是 bash 變數（執行期）
+        else
+          # ✅ 沒指定：改為「看目前流量最大的那一筆」來判斷現在線上是誰
+          #    1) 取 service 描述的 JSON
+          #    2) 用內建的 python3 找出 status.traffic[] 中 percent 最大且有 tag 的那筆
+          #       （沒資料時印空字串，避免 set -u 爆）
+          CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" --format=json \
+            | python3 - <<'PY'
+          import sys, json
+          d = json.load(sys.stdin)
+          ts = d.get("status", {}).get("traffic", [])
+          # 僅考慮有 tag 的條目；若 tie，max() 會取第一個最大者（順序即可）
+          candidates = [t for t in ts if t.get("tag")]
+          if candidates:
+              m = max(candidates, key=lambda t: t.get("percent", 0) or 0)
+              print(m.get("tag", ""))
+          else:
+              print("")  # 沒有任何 tagged 流量時回空字串
+          PY
+          )" || true
+
+          # ✅ 決策：現在線上若是 blue，下一次就發 green；反之亦然
+          if [[ "${CURR:-blue}" == "blue" ]]; then
+            NEXT_TAG=green
+          else
+            NEXT_TAG=blue
+          fi
         fi
-        NEXT_TAG="$$USER_NEXT"
-      else
-        CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
-          --format='value(status.traffic[0].tag)' || true)"
-        echo "Current tag: $$CURR"
-        if [[ "${CURR:-blue}" == "blue" ]]; then 
-          NEXT_TAG=green;
-        else 
-          NEXT_TAG=blue; 
-        fi
-      fi
-      echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
+
+        # ✅ 把「下一色」寫到檔案，給後續步驟 source 使用
+        #    注意：這裡用 $$NEXT_TAG，避免被 Cloud Build 當成 substitution
+        echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
+
+        # （除錯需要時可打開）
+        # echo "_SERVICE=${_SERVICE} _REGION=${_REGION} CURR=${CURR:-<none>} NEXT_TAG=$$NEXT_TAG"
 
 
   # 4) Deploy new revision with NO traffic (0%), tag = NEXT_TAG
@@ -80,20 +133,19 @@ steps:
         source /workspace/next_color
         echo "Deployed ${_SERVICE} new revision with tag=$$NEXT_TAG at 0%."
         echo "到 Cloud Run > ${_SERVICE} > Revisions > Tags 複製 $$NEXT_TAG 的 tag URL 測 /healthz。"
-        echo "測試通過後，再用 Manage traffic 把 $$NEXT_TAG=100%（或做金絲雀 1%、5% ...）"
 
- # 6 ) 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
-  # - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-  #   id: promote-to-100
-  #   entrypoint: bash
-  #   args:
-  #     - -ceu
-  #     - |
-  #       source /workspace/next_color
-  #       gcloud run services update-traffic "${_SERVICE}" \
-  #         --region "${_REGION}" \
-  #         --to-tags "$$NEXT_TAG=100"
-  #       echo "Traffic switched to $$NEXT_TAG=100%"
+  # 6 ) 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: promote-to-100
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        source /workspace/next_color
+        gcloud run services update-traffic "${_SERVICE}" \
+          --region "${_REGION}" \
+          --to-tags "$$NEXT_TAG=100"
+        echo "Traffic switched to $$NEXT_TAG=100%"
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}

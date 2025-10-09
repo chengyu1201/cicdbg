@@ -64,7 +64,7 @@ steps:
         gcloud run deploy "${_SERVICE}" \
           --image "$$IMAGE" \
           --region "${_REGION}" \
-          --tag "$NEXT_TAG" \
+          --tag "$$NEXT_TAG" \
           --no-traffic \
           --service-account "${_RUNTIME_SA}" \
           --set-env-vars=APP_VERSION="${SHORT_SHA}",APP_COLOR="$$NEXT_TAG"

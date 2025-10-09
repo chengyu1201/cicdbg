@@ -41,7 +41,6 @@ const html = (v, c, theme) => `<!doctype html>
     <p>Current color: <span class="pill ${c==='green'?'green':'blue'}">${c}</span></p>
     <pre>version=${v}
 color=${c}</pre>
-    <p style="opacity:.7">Tip: 顏色來自環境變數 <code>APP_COLOR</code>；由 Cloud Build 依藍綠/金絲雀自動設定。</p>
   </div>
 </body>`;
 

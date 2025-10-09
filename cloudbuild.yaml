@@ -14,7 +14,7 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
       - .
 
   # 2) Push image
@@ -22,7 +22,7 @@ steps:
     id: push
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
   # 3) Decide next color
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -59,12 +59,12 @@ steps:
       - |
         set -euo pipefail
         source /workspace/next_color
-        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
         echo "Deploying image: $$IMAGE with tag: $$NEXT_TAG (no traffic)"
         gcloud run deploy "${_SERVICE}" \
           --image "$$IMAGE" \
           --region "${_REGION}" \
-          --tag "$$NEXT_TAG" \
+          --tag "$NEXT_TAG" \
           --no-traffic \
           --service-account "${_RUNTIME_SA}" \
           --set-env-vars=APP_VERSION="${SHORT_SHA}",APP_COLOR="$$NEXT_TAG"
@@ -81,18 +81,18 @@ steps:
         echo "到 Cloud Run > ${_SERVICE} > Revisions > Tags 複製 $$NEXT_TAG 的 tag URL 測 /healthz。"
         echo "測試通過後，再用 Manage traffic 把 $$NEXT_TAG=100%（或做金絲雀 1%、5% ...）"
 
-# 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    id: promote-to-100
-    entrypoint: bash
-    args:
-      - -ceu
-      - |
-        source /workspace/next_color
-        gcloud run services update-traffic "${_SERVICE}" \
-          --region "${_REGION}" \
-          --to-tags "$$NEXT_TAG=100"
-        echo "Traffic switched to $$NEXT_TAG=100%"
+ # 6 ) 想自動切 100% 才打開下列步驟，並同樣用 $$NEXT_TAG
+  # - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+  #   id: promote-to-100
+  #   entrypoint: bash
+  #   args:
+  #     - -ceu
+  #     - |
+  #       source /workspace/next_color
+  #       gcloud run services update-traffic "${_SERVICE}" \
+  #         --region "${_REGION}" \
+  #         --to-tags "$$NEXT_TAG=100"
+  #       echo "Traffic switched to $$NEXT_TAG=100%"
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}

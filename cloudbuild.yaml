@@ -24,31 +24,6 @@ steps:
       - push
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}
 
-  # 3) Decide next color
-  # - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-  #   id: decide-color
-  #   entrypoint: bash
-  #   args:
-  #   - -ceu
-  #   - |
-  #     set -euo pipefail
-  #     USER_NEXT="${_NEXT_TAG:-}"
-  #     if [[ -n "$$USER_NEXT" ]]; then
-  #       if [[ "$$USER_NEXT" != "blue" && "$$USER_NEXT" != "green" ]]; then
-  #         echo "invalid _NEXT_TAG=$$USER_NEXT"; exit 1
-  #       fi
-  #       NEXT_TAG="$$USER_NEXT"
-  #     else
-  #       CURR="$(gcloud run services describe "${_SERVICE}" --region "${_REGION}" \
-  #         --format='value(status.traffic[0].tag)' || true)"
-  #       echo "Current tag: $$CURR"
-  #       if [[ "${CURR:-blue}" == "blue" ]]; then 
-  #         NEXT_TAG=green;
-  #       else 
-  #         NEXT_TAG=blue; 
-  #       fi
-  #     fi
-  #     echo "NEXT_TAG=$$NEXT_TAG" | tee /workspace/next_color
   # 3) Decide next color（改成看「流量最大」那一筆）
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: decide-color

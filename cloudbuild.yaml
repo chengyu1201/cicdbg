@@ -84,8 +84,7 @@ steps:
               m = max(candidates, key=lambda t: t.get("percent", 0) or 0)
               print(m.get("tag", ""))
           else:
-              print("")  # 沒有任何 tagged 流量時回空字串
-          PY
+              print("")PY
           )" || true
 
           # ✅ 決策：現在線上若是 blue，下一次就發 green；反之亦然

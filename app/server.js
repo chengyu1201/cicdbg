@@ -37,7 +37,7 @@ const html = (v, c, theme) => `<!doctype html>
 </style>
 <body class="${theme}">
   <div class="wrap">
-    <h1>Cloud Run Demo</h1>
+    <h1>CI/CD blueGreen</h1>
     <p>Current color: <span class="pill ${c==='green'?'green':'blue'}">${c}</span></p>
     <pre>version=${v}
 color=${c}</pre>
